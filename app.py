@@ -13,7 +13,6 @@ import altair as alt
 model = load_model("model/rul_cnn_lstm.h5")
 scaler = joblib.load("model/scaler.pkl")
 
-# IMPORTANT: use what the scaler expects
 num_features = scaler.n_features_in_
 sequence_length = model.input_shape[1]
 
@@ -79,18 +78,22 @@ if t >= len(engine_df):
 # -------------------------
 row = engine_df.iloc[t]
 
-# Select EXACT number of features expected by scaler/model
-# (take last N sensor columns)
-sensor_cols = [f"s{i}" for i in range(1, 22)]
-sensor_cols = sensor_cols[-num_features:]
+# -------------------------
+# SAFE feature selection (CRITICAL FIX)
+# -------------------------
+all_sensor_cols = [f"s{i}" for i in range(1, 22)]
 
-# Safety check
-missing = [c for c in sensor_cols if c not in df.columns]
-if missing:
-    st.error(f"Missing columns: {missing}")
-    st.stop()
+# Always take FIRST N features that scaler expects
+sensor_cols = all_sensor_cols[:num_features]
 
 features = row[sensor_cols].values
+
+# Safety check
+if len(features) != num_features:
+    st.error(f"Feature mismatch: expected {num_features}, got {len(features)}")
+    st.stop()
+
+# Scale
 features_scaled = scaler.transform([features])[0]
 
 # -------------------------
