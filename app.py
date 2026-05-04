@@ -79,24 +79,20 @@ if t >= len(engine_df):
 row = engine_df.iloc[t]
 
 # -------------------------
-# CORRECT feature selection (IMPORTANT)
+# Feature selection (FINAL FIX)
 # -------------------------
 feature_cols = (
-    [f"op{i}" for i in range(1, 4)] +   # op1, op2, op3
-    [f"s{i}" for i in range(1, 22)]     # s1–s21
+    [f"op{i}" for i in range(1, 4)] +
+    [f"s{i}" for i in range(1, 22)]
 )
 
-# match scaler expectation (usually 24)
 feature_cols = feature_cols[:num_features]
-
 features = row[feature_cols].values
 
-# safety check
 if len(features) != num_features:
     st.error(f"Feature mismatch: expected {num_features}, got {len(features)}")
     st.stop()
 
-# scale input
 features_scaled = scaler.transform([features])[0]
 
 # -------------------------
@@ -123,7 +119,7 @@ else:
 true_rul = len(engine_df) - t
 
 # -------------------------
-# Real UTC time
+# Time (UTC)
 # -------------------------
 current_time = pd.Timestamp.utcnow().floor("s")
 
@@ -141,9 +137,16 @@ with open(DATA_FILE, "a") as f:
     new_row.to_csv(f, header=False, index=False)
 
 # -------------------------
-# Load recent data
+# Load data safely
 # -------------------------
-data = pd.read_csv(DATA_FILE, parse_dates=["time"]).tail(100)
+data = pd.read_csv(DATA_FILE)
+
+# CLEAN DATA (important)
+data["time"] = pd.to_datetime(data["time"], errors="coerce")
+data["Predicted_RUL"] = pd.to_numeric(data["Predicted_RUL"], errors="coerce")
+data["True_RUL"] = pd.to_numeric(data["True_RUL"], errors="coerce")
+
+data = data.dropna().tail(100)
 
 # -------------------------
 # UI
@@ -162,7 +165,7 @@ st.subheader("Recent Data")
 st.dataframe(data.tail(10), use_container_width=True)
 
 # -------------------------
-# Plot
+# Plot (SAFE VERSION)
 # -------------------------
 if not data.empty:
     chart = alt.Chart(data).transform_fold(
@@ -172,12 +175,12 @@ if not data.empty:
         x=alt.X('time:T', title='Time (UTC)'),
         y=alt.Y('RUL:Q', title='Remaining Useful Life'),
         color='Type:N',
-        tooltip=['time', 'Type', 'RUL']
+        tooltip=['time:T', 'Type:N', 'RUL:Q']
     )
 
     st.altair_chart(chart, use_container_width=True)
 else:
-    st.info("Waiting for data...")
+    st.info("Waiting for valid data...")
 
 # -------------------------
 # Advance time
