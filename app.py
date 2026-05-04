@@ -27,7 +27,7 @@ SCENARIOS = {
 def simulate_sensors(base_val=0.5, noise=0.1):
     return {
         f"sensor{i}": round(random.uniform(base_val - noise, base_val + noise), 3)
-        for i in range(1, 22)
+        for i in range(1, num_features + 1)
     }
 
 def generate_packets(num_engines=5):
@@ -56,9 +56,10 @@ history = pd.DataFrame(columns=["engine_id", "scenario", "Predicted_RUL",
 # run the simulation
 for pkt in generate_packets(num_engines=1):
     # make model prediction
-    features = np.array([[pkt[f"sensor{i}"] for i in range(1, 22)]])
+    num_features = scaler.n_features_in_
+    features = np.array([[pkt[f"sensor{i}"] for i in range(1, num_features + 1)]])
     features_scaled = scaler.transform(features)
-    features_scaled = features_scaled.reshape((1, 1, 5))
+    features_scaled = features_scaled.reshape((1, 1, num_features))
     
     pred = model.predict(features_scaled)[0][0]
     pkt["Predicted_RUL"] = float(pred)
