@@ -3,13 +3,12 @@ import pandas as pd
 import numpy as np
 from tensorflow.keras.models import load_model
 import joblib
-import random
 import time
 import os
 import altair as alt
 
 # -------------------------
-# Load model
+# Load model & scaler
 # -------------------------
 model = load_model("model/rul_cnn_lstm.h5")
 scaler = joblib.load("model/scaler.pkl")
@@ -20,86 +19,72 @@ sequence_length = model.input_shape[1]
 DATA_FILE = "shared_data.csv"
 
 # -------------------------
-# Scenarios
+# Load CMAPSS dataset
 # -------------------------
-SCENARIOS = {
-    1: {"name": "New engine", "noise": 0.01},
-    2: {"name": "Mid-age engine", "noise": 0.05},
-    3: {"name": "Near end of life", "noise": 0.07},
-    4: {"name": "Critical degradation", "noise": 0.12},
-    5: {"name": "Faulty sensor spike", "noise": 0.1},
-}
+@st.cache_data
+def load_data():
+    df = pd.read_csv("test_FD001.txt", sep=" ", header=None)
+    df = df.dropna(axis=1)
+
+    df.columns = (
+        ["unit", "cycle"] +
+        [f"op{i}" for i in range(1, 4)] +
+        [f"s{i}" for i in range(1, 22)]
+    )
+    return df
+
+df = load_data()
 
 # -------------------------
-# Init file
+# Init CSV
 # -------------------------
 if not os.path.exists(DATA_FILE):
-    pd.DataFrame(columns=["time", "RUL", "scenario"]).to_csv(DATA_FILE, index=False)
+    pd.DataFrame(columns=["time", "Predicted_RUL", "True_RUL", "unit"]).to_csv(DATA_FILE, index=False)
 
 # -------------------------
 # Session state
 # -------------------------
-if "buffer" not in st.session_state:
-    st.session_state.buffer = []
+if "unit_id" not in st.session_state:
+    st.session_state.unit_id = int(df["unit"].sample().iloc[0])
 
 if "time_step" not in st.session_state:
     st.session_state.time_step = 0
 
-if "scenario_id" not in st.session_state:
-    st.session_state.scenario_id = 1
-
-if "step_count" not in st.session_state:
-    st.session_state.step_count = 0
-
-if "prev_scenario_id" not in st.session_state:
-    st.session_state.prev_scenario_id = st.session_state.scenario_id
+if "buffer" not in st.session_state:
+    st.session_state.buffer = []
 
 # -------------------------
-# Scenario switching
+# Select engine
 # -------------------------
-st.session_state.step_count += 1
-
-if st.session_state.step_count % 100 == 0:
-    st.session_state.scenario_id += 1
-    if st.session_state.scenario_id > len(SCENARIOS):
-        st.session_state.scenario_id = 1
+engine_df = df[df["unit"] == st.session_state.unit_id].reset_index(drop=True)
+t = st.session_state.time_step
 
 # -------------------------
-# RESET CSV WHEN SCENARIO CHANGES
+# Reset when engine ends
 # -------------------------
-if st.session_state.scenario_id != st.session_state.prev_scenario_id:
-    pd.DataFrame(columns=["time", "RUL", "scenario"]).to_csv(DATA_FILE, index=False)
+if t >= len(engine_df):
+    st.warning("Engine finished. Switching to new engine...")
 
+    st.session_state.unit_id = int(df["unit"].sample().iloc[0])
     st.session_state.time_step = 0
     st.session_state.buffer = []
 
-    st.session_state.prev_scenario_id = st.session_state.scenario_id
+    # Reset CSV
+    pd.DataFrame(columns=["time", "Predicted_RUL", "True_RUL", "unit"]).to_csv(DATA_FILE, index=False)
+
+    st.rerun()
 
 # -------------------------
-# Current scenario
+# Get current row
 # -------------------------
-sid = st.session_state.scenario_id
-s = SCENARIOS[sid]
+row = engine_df.iloc[t]
 
-# -------------------------
-# Simulate sensors
-# -------------------------
-def simulate_sensors(noise):
-    return np.array([
-        random.uniform(0.5 - noise, 0.5 + noise)
-        for _ in range(num_features)
-    ])
-
-features = simulate_sensors(s["noise"])
+sensor_cols = [f"s{i}" for i in range(1, num_features + 1)]
+features = row[sensor_cols].values
 features_scaled = scaler.transform([features])[0]
 
 # -------------------------
-# Load existing data
-# -------------------------
-data = pd.read_csv(DATA_FILE)
-
-# -------------------------
-# Buffer logic
+# Buffer update
 # -------------------------
 st.session_state.buffer.append(features_scaled)
 
@@ -111,63 +96,80 @@ if len(st.session_state.buffer) > sequence_length:
 # -------------------------
 if len(st.session_state.buffer) == sequence_length:
     input_seq = np.array(st.session_state.buffer).reshape(1, sequence_length, num_features)
-    pred = float(model.predict(input_seq)[0][0])
+    pred = float(model.predict(input_seq, verbose=0)[0][0])
     st.session_state.last_pred = pred
 else:
-    if "last_pred" in st.session_state:
-        pred = st.session_state.last_pred
-    else:
-        pred = 0.0
+    pred = st.session_state.get("last_pred", 0.0)
 
 # -------------------------
-# Time (continuous per scenario)
+# True RUL
 # -------------------------
-st.session_state.time_step += 1
-current_time = st.session_state.time_step
+true_rul = len(engine_df) - t
 
 # -------------------------
-# Save data safely
+# Real UTC time
+# -------------------------
+current_time = pd.Timestamp.utcnow().floor("s")
+
+# -------------------------
+# Save to CSV
 # -------------------------
 new_row = pd.DataFrame({
     "time": [current_time],
-    "RUL": [pred],
-    "scenario": [s["name"]]
+    "Predicted_RUL": [pred],
+    "True_RUL": [true_rul],
+    "unit": [st.session_state.unit_id]
 })
 
 with open(DATA_FILE, "a") as f:
     new_row.to_csv(f, header=False, index=False)
 
-# reload data
-data = pd.read_csv(DATA_FILE).tail(100)
+# -------------------------
+# Load recent data
+# -------------------------
+data = pd.read_csv(DATA_FILE, parse_dates=["time"]).tail(100)
 
 # -------------------------
 # UI
 # -------------------------
-st.title("🛠️ NASA Turbofan Live Predictive Maintenance Dashboard")
+st.title("🛠️ Real-Time Turbofan RUL Prediction Dashboard")
 
-with st.container():
-    st.markdown(f"""
-    ### Engine E{sid:03d}
+st.markdown(f"""
+### Engine ID: {st.session_state.unit_id}
 
-    🧪 **Scenario:** `{s['name']}`  
-    📊 **Predicted RUL:** `{pred:.1f} cycles`
-    """)
+⏱️ Cycle: `{t}`  
+📊 Predicted RUL: `{pred:.2f}`  
+🎯 True RUL: `{true_rul}`  
+""")
 
-    st.subheader("Recent Data")
-    st.dataframe(data.tail(10), use_container_width=True)
+st.subheader("Recent Data")
+st.dataframe(data.tail(10), use_container_width=True)
 
-    st.subheader("RUL vs Time")
-
-    chart = alt.Chart(data).mark_line(point=True).encode(
-        x=alt.X('time:Q', title='Time (seconds)'),
-        y=alt.Y('RUL:Q', title='Remaining Useful Life (cycles)'),
-        tooltip=['time', 'RUL', 'scenario']
+# -------------------------
+# Plot
+# -------------------------
+if not data.empty:
+    chart = alt.Chart(data).transform_fold(
+        ['Predicted_RUL', 'True_RUL'],
+        as_=['Type', 'RUL']
+    ).mark_line().encode(
+        x=alt.X('time:T', title='Time (UTC)'),
+        y=alt.Y('RUL:Q', title='Remaining Useful Life'),
+        color='Type:N',
+        tooltip=['time', 'Type', 'RUL']
     )
 
     st.altair_chart(chart, use_container_width=True)
+else:
+    st.info("Waiting for data...")
 
 # -------------------------
-# LOOP
+# Advance time
+# -------------------------
+st.session_state.time_step += 1
+
+# -------------------------
+# Loop
 # -------------------------
 time.sleep(1)
 st.rerun()
