@@ -5,7 +5,8 @@ from tensorflow.keras.models import load_model
 import joblib
 import random
 import time
-from itertools import cycle
+import os
+import altair as alt
 
 # -------------------------
 # Load model
@@ -15,6 +16,8 @@ scaler = joblib.load("model/scaler.pkl")
 
 num_features = scaler.n_features_in_
 sequence_length = model.input_shape[1]
+
+DATA_FILE = "shared_data.csv"
 
 # -------------------------
 # Scenarios
@@ -36,15 +39,11 @@ def simulate_sensors(base_val=0.5, noise=0.1):
         for i in range(1, num_features + 1)
     }
 
-def generate_packets():
-    for sid in cycle(SCENARIOS.keys()):
-        s = SCENARIOS[sid]
-        pkt = simulate_sensors(noise=s["noise"])
-        pkt.update({
-            "engine_id": f"E{sid:03d}",
-            "scenario": s["name"],
-        })
-        yield pkt
+# -------------------------
+# Shared data init
+# -------------------------
+if not os.path.exists(DATA_FILE):
+    pd.DataFrame(columns=["time", "RUL", "scenario"]).to_csv(DATA_FILE, index=False)
 
 # -------------------------
 # Streamlit UI
@@ -54,47 +53,93 @@ st.title("🛠️ NASA Turbofan Live Predictive Maintenance Dashboard")
 status = st.empty()
 chart_placeholder = st.empty()
 
-# initialize chart (IMPORTANT)
-chart = chart_placeholder.line_chart(pd.DataFrame({"RUL": []}))
+# session state
+if "buffer" not in st.session_state:
+    st.session_state.buffer = []
 
-# storage
-buffer = []
-time_step = 0
+if "time_step" not in st.session_state:
+    st.session_state.time_step = 0
+
+if "scenario_id" not in st.session_state:
+    st.session_state.scenario_id = 1
 
 # -------------------------
-# Main loop
+# MAIN LOOP
 # -------------------------
-for pkt in generate_packets():
-    
-    # extract features
-    features = np.array([pkt[f"sensor{i}"] for i in range(1, num_features + 1)])
-    features_scaled = scaler.transform([features])[0]
+sid = st.session_state.scenario_id
+s = SCENARIOS[sid]
 
-    # buffer
-    buffer.append(features_scaled)
-    if len(buffer) > sequence_length:
-        buffer.pop(0)
+pkt = simulate_sensors(noise=s["noise"])
 
-    # prediction
-    if len(buffer) == sequence_length:
-        input_seq = np.array(buffer).reshape(1, sequence_length, num_features)
-        pred = float(model.predict(input_seq)[0][0])
-    else:
-        pred = 0.0
+# feature extraction
+features = np.array([pkt[f"sensor{i}"] for i in range(1, num_features + 1)])
+features_scaled = scaler.transform([features])[0]
 
-    time_step += 1
+# buffer logic
+st.session_state.buffer.append(features_scaled)
 
-    # -------------------------
-    # UI updates
-    # -------------------------
-    status.subheader(f"Engine {pkt['engine_id']}")
-    status.write(f"**Scenario:** {pkt['scenario']}")
-    status.metric("Predicted RUL (cycles)", f"{pred:.1f}")
+if len(st.session_state.buffer) > sequence_length:
+    st.session_state.buffer.pop(0)
 
-    st.progress(min(100, int(100 - pred / 300 * 100)))
+# prediction
+if len(st.session_state.buffer) == sequence_length:
+    input_seq = np.array(st.session_state.buffer).reshape(1, sequence_length, num_features)
+    pred = float(model.predict(input_seq)[0][0])
+else:
+    pred = 0.0
 
-    # update chart properly (RUL vs time)
-    new_data = pd.DataFrame({"RUL": [pred]}, index=[time_step])
-    chart.add_rows(new_data)
+# update time
+st.session_state.time_step += 1
 
-    time.sleep(2)
+# -------------------------
+# SAVE DATA
+# -------------------------
+new_row = pd.DataFrame({
+    "time": [st.session_state.time_step],
+    "RUL": [pred],
+    "scenario": [s["name"]]
+})
+
+new_row.to_csv(DATA_FILE, mode="a", header=False, index=False)
+
+# -------------------------
+# LOAD DATA
+# -------------------------
+data = pd.read_csv(DATA_FILE).tail(100)
+
+# -------------------------
+# UI DISPLAY
+# -------------------------
+status.markdown(f"""
+### Engine E{sid:03d}
+
+🧪 **Scenario:** `{s['name']}`
+
+📊 **Predicted RUL:** `{pred:.1f} cycles`
+""")
+
+# recent data
+st.subheader("Recent Data")
+st.dataframe(data.tail(10), use_container_width=True)
+
+# -------------------------
+# ALTAIR CHART (with labels)
+# -------------------------
+st.subheader("RUL vs Time")
+
+chart = alt.Chart(data).mark_line(point=True).encode(
+    x=alt.X('time:Q', title='Time (seconds)'),
+    y=alt.Y('RUL:Q', title='Remaining Useful Life (cycles)'),
+    tooltip=['time', 'RUL', 'scenario']
+).properties(
+    width=700,
+    height=400
+)
+
+chart_placeholder.altair_chart(chart, use_container_width=True)
+
+# -------------------------
+# LOOP CONTROL
+# -------------------------
+time.sleep(2)
+st.rerun()
