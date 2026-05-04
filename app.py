@@ -36,10 +36,10 @@ def load_data():
 df = load_data()
 
 # -------------------------
-# Init CSV
+# Init CSV (UPDATED)
 # -------------------------
 if not os.path.exists(DATA_FILE):
-    pd.DataFrame(columns=["time", "Predicted_RUL", "True_RUL", "unit"]).to_csv(DATA_FILE, index=False)
+    pd.DataFrame(columns=["cycle", "Predicted_RUL", "True_RUL", "unit"]).to_csv(DATA_FILE, index=False)
 
 # -------------------------
 # Session state
@@ -69,7 +69,7 @@ if t >= len(engine_df):
     st.session_state.time_step = 0
     st.session_state.buffer = []
 
-    pd.DataFrame(columns=["time", "Predicted_RUL", "True_RUL", "unit"]).to_csv(DATA_FILE, index=False)
+    pd.DataFrame(columns=["cycle", "Predicted_RUL", "True_RUL", "unit"]).to_csv(DATA_FILE, index=False)
 
     st.rerun()
 
@@ -79,7 +79,7 @@ if t >= len(engine_df):
 row = engine_df.iloc[t]
 
 # -------------------------
-# Feature selection (FINAL FIX)
+# Feature selection
 # -------------------------
 feature_cols = (
     [f"op{i}" for i in range(1, 4)] +
@@ -119,15 +119,10 @@ else:
 true_rul = len(engine_df) - t
 
 # -------------------------
-# Time (UTC)
-# -------------------------
-current_time = pd.Timestamp.utcnow().floor("s")
-
-# -------------------------
-# Save to CSV
+# Save to CSV (UPDATED)
 # -------------------------
 new_row = pd.DataFrame({
-    "time": [current_time],
+    "cycle": [t],
     "Predicted_RUL": [pred],
     "True_RUL": [true_rul],
     "unit": [st.session_state.unit_id]
@@ -141,12 +136,15 @@ with open(DATA_FILE, "a") as f:
 # -------------------------
 data = pd.read_csv(DATA_FILE)
 
-# CLEAN DATA (important)
-data["time"] = pd.to_datetime(data["time"], errors="coerce")
+# Clean data
+data["cycle"] = pd.to_numeric(data["cycle"], errors="coerce")
 data["Predicted_RUL"] = pd.to_numeric(data["Predicted_RUL"], errors="coerce")
 data["True_RUL"] = pd.to_numeric(data["True_RUL"], errors="coerce")
 
 data = data.dropna().tail(100)
+
+# Sort (important)
+data = data.sort_values(by="cycle")
 
 # -------------------------
 # UI
@@ -165,17 +163,17 @@ st.subheader("Recent Data")
 st.dataframe(data.tail(10), use_container_width=True)
 
 # -------------------------
-# Plot (SAFE VERSION)
+# Plot (FIXED)
 # -------------------------
 if not data.empty:
     chart = alt.Chart(data).transform_fold(
         ['Predicted_RUL', 'True_RUL'],
         as_=['Type', 'RUL']
     ).mark_line().encode(
-        x=alt.X('time:T', title='Time (UTC)'),
-        y=alt.Y('RUL:Q', title='Remaining Useful Life'),
+        x=alt.X('cycle:Q', title='Cycle'),
+        y=alt.Y('RUL:Q', title='Remaining Useful Life (cycles)'),
         color='Type:N',
-        tooltip=['time:T', 'Type:N', 'RUL:Q']
+        tooltip=['cycle:Q', 'Type:N', 'RUL:Q']
     )
 
     st.altair_chart(chart, use_container_width=True)
@@ -183,7 +181,7 @@ else:
     st.info("Waiting for valid data...")
 
 # -------------------------
-# Advance time
+# Advance time (cycle progression)
 # -------------------------
 st.session_state.time_step += 1
 
