@@ -196,5 +196,5 @@ st.session_state.time_step += 1
 # -------------------------
 # Loop
 # -------------------------
-time.sleep(1)
+time.sleep(0.1)
 st.rerun()
