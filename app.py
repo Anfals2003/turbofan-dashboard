@@ -13,8 +13,8 @@ import altair as alt
 model = load_model("model/rul_cnn_lstm.h5")
 scaler = joblib.load("model/scaler.pkl")
 
-# FORCE correct feature size (CMAPSS)
-num_features = 21
+# IMPORTANT: use what the scaler expects
+num_features = scaler.n_features_in_
 sequence_length = model.input_shape[1]
 
 DATA_FILE = "shared_data.csv"
@@ -79,10 +79,12 @@ if t >= len(engine_df):
 # -------------------------
 row = engine_df.iloc[t]
 
-# FIXED sensor columns
+# Select EXACT number of features expected by scaler/model
+# (take last N sensor columns)
 sensor_cols = [f"s{i}" for i in range(1, 22)]
+sensor_cols = sensor_cols[-num_features:]
 
-# Safety check (very useful)
+# Safety check
 missing = [c for c in sensor_cols if c not in df.columns]
 if missing:
     st.error(f"Missing columns: {missing}")
