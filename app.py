@@ -31,7 +31,7 @@ SCENARIOS = {
 }
 
 # -------------------------
-# Init shared file
+# Init file
 # -------------------------
 if not os.path.exists(DATA_FILE):
     pd.DataFrame(columns=["time", "RUL", "scenario"]).to_csv(DATA_FILE, index=False)
@@ -51,6 +51,9 @@ if "scenario_id" not in st.session_state:
 if "step_count" not in st.session_state:
     st.session_state.step_count = 0
 
+if "prev_scenario_id" not in st.session_state:
+    st.session_state.prev_scenario_id = st.session_state.scenario_id
+
 # -------------------------
 # Scenario switching
 # -------------------------
@@ -61,6 +64,20 @@ if st.session_state.step_count % 100 == 0:
     if st.session_state.scenario_id > len(SCENARIOS):
         st.session_state.scenario_id = 1
 
+# -------------------------
+# RESET CSV WHEN SCENARIO CHANGES
+# -------------------------
+if st.session_state.scenario_id != st.session_state.prev_scenario_id:
+    pd.DataFrame(columns=["time", "RUL", "scenario"]).to_csv(DATA_FILE, index=False)
+
+    st.session_state.time_step = 0
+    st.session_state.buffer = []
+
+    st.session_state.prev_scenario_id = st.session_state.scenario_id
+
+# -------------------------
+# Current scenario
+# -------------------------
 sid = st.session_state.scenario_id
 s = SCENARIOS[sid]
 
@@ -77,12 +94,15 @@ features = simulate_sensors(s["noise"])
 features_scaled = scaler.transform([features])[0]
 
 # -------------------------
-# Build shared buffer using CSV
+# Load existing data
 # -------------------------
 data = pd.read_csv(DATA_FILE)
 
-# keep local buffer for first session
+# -------------------------
+# Buffer logic
+# -------------------------
 st.session_state.buffer.append(features_scaled)
+
 if len(st.session_state.buffer) > sequence_length:
     st.session_state.buffer.pop(0)
 
@@ -92,34 +112,36 @@ if len(st.session_state.buffer) > sequence_length:
 if len(st.session_state.buffer) == sequence_length:
     input_seq = np.array(st.session_state.buffer).reshape(1, sequence_length, num_features)
     pred = float(model.predict(input_seq)[0][0])
+    st.session_state.last_pred = pred
 else:
-    # fallback → use last known value from shared data
-    if len(data) > 0:
-        pred = data["RUL"].iloc[-1]
+    if "last_pred" in st.session_state:
+        pred = st.session_state.last_pred
     else:
         pred = 0.0
 
 # -------------------------
-# Update time
+# Time (continuous per scenario)
 # -------------------------
 st.session_state.time_step += 1
+current_time = st.session_state.time_step
 
 # -------------------------
-# Save data
+# Save data safely
 # -------------------------
 new_row = pd.DataFrame({
-    "time": [st.session_state.time_step],
+    "time": [current_time],
     "RUL": [pred],
     "scenario": [s["name"]]
 })
 
-new_row.to_csv(DATA_FILE, mode="a", header=False, index=False)
+with open(DATA_FILE, "a") as f:
+    new_row.to_csv(f, header=False, index=False)
 
 # reload data
 data = pd.read_csv(DATA_FILE).tail(100)
 
 # -------------------------
-# UI (use container to reduce flicker)
+# UI
 # -------------------------
 st.title("🛠️ NASA Turbofan Live Predictive Maintenance Dashboard")
 
@@ -147,5 +169,5 @@ with st.container():
 # -------------------------
 # LOOP
 # -------------------------
-time.sleep(2)
+time.sleep(1)
 st.rerun()
