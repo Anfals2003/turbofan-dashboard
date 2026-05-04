@@ -79,21 +79,24 @@ if t >= len(engine_df):
 row = engine_df.iloc[t]
 
 # -------------------------
-# SAFE feature selection (CRITICAL FIX)
+# CORRECT feature selection (IMPORTANT)
 # -------------------------
-all_sensor_cols = [f"s{i}" for i in range(1, 22)]
+feature_cols = (
+    [f"op{i}" for i in range(1, 4)] +   # op1, op2, op3
+    [f"s{i}" for i in range(1, 22)]     # s1–s21
+)
 
-# Always take FIRST N features that scaler expects
-sensor_cols = all_sensor_cols[:num_features]
+# match scaler expectation (usually 24)
+feature_cols = feature_cols[:num_features]
 
-features = row[sensor_cols].values
+features = row[feature_cols].values
 
-# Safety check
+# safety check
 if len(features) != num_features:
     st.error(f"Feature mismatch: expected {num_features}, got {len(features)}")
     st.stop()
 
-# Scale
+# scale input
 features_scaled = scaler.transform([features])[0]
 
 # -------------------------
