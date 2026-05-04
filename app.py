@@ -53,20 +53,37 @@ chart_placeholder = st.empty()
 history = pd.DataFrame(columns=["engine_id", "scenario", "Predicted_RUL",
                                 "sensor1", "sensor2", "sensor3", "sensor4", "sensor5"])
 
+sequence_length = model.input_shape[1]
+buffer = []
+
 # run the simulation
 for pkt in generate_packets(num_engines=1):
-    # make model prediction
-    features = np.array([[pkt[f"sensor{i}"] for i in range(1, num_features + 1)]])
-    features_scaled = scaler.transform(features)
-    features_scaled = features_scaled.reshape((1, 30, num_features))
-    
-    pred = model.predict(features_scaled)[0][0]
+    # extract features (1 timestep)
+    features = np.array([pkt[f"sensor{i}"] for i in range(1, num_features + 1)])
+
+    # scale
+    features_scaled = scaler.transform([features])[0]
+
+    # add to buffer
+    buffer.append(features_scaled)
+
+    # keep last N timesteps
+    if len(buffer) > sequence_length:
+        buffer.pop(0)
+
+    # prediction only when buffer full
+    if len(buffer) == sequence_length:
+        input_seq = np.array(buffer).reshape(1, sequence_length, num_features)
+        pred = model.predict(input_seq)[0][0]
+    else:
+        pred = 0.0  # buffer not full yet
+
     pkt["Predicted_RUL"] = float(pred)
 
-    # update history for chart
+    # update history
     history = pd.concat([history, pd.DataFrame([pkt])]).tail(40)
 
-    # refresh dashboard
+    # UI updates
     status_placeholder.subheader(f"Engine {pkt['engine_id']} – {pkt['scenario']}")
     status_placeholder.metric("Predicted Remaining Useful Life (cycles)", f"{pred:.1f}")
     st.progress(min(100, int(100 - pred / 300 * 100)))
