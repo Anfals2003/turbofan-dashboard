@@ -20,7 +20,7 @@ sequence_length = model.input_shape[1]
 # -------------------------
 @st.cache_data
 def load_data():
-    df = pd.read_csv("data/test_FD001.txt", sep=" ", header=None)
+    df = pd.read_csv("test_FD001.txt", sep=" ", header=None)
     df = df.dropna(axis=1)
 
     df.columns = (
@@ -37,7 +37,7 @@ df = load_data()
 # -------------------------
 @st.cache_data
 def load_rul():
-    rul = pd.read_csv("data/RUL_FD001.txt", header=None)
+    rul = pd.read_csv("RUL_FD001.txt", header=None)
     return rul[0].values
 
 rul_values = load_rul()
@@ -170,5 +170,5 @@ st.session_state.time_step += 1
 # -------------------------
 # Loop
 # -------------------------
-time.sleep(1)
+time.sleep(0.5)
 st.rerun()
