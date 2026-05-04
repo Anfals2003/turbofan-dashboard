@@ -31,29 +31,14 @@ SCENARIOS = {
 }
 
 # -------------------------
-# Sensor simulation
-# -------------------------
-def simulate_sensors(base_val=0.5, noise=0.1):
-    return {
-        f"sensor{i}": random.uniform(base_val - noise, base_val + noise)
-        for i in range(1, num_features + 1)
-    }
-
-# -------------------------
-# Shared data init
+# Init shared file
 # -------------------------
 if not os.path.exists(DATA_FILE):
     pd.DataFrame(columns=["time", "RUL", "scenario"]).to_csv(DATA_FILE, index=False)
 
 # -------------------------
-# Streamlit UI
+# Session state
 # -------------------------
-st.title("🛠️ NASA Turbofan Live Predictive Maintenance Dashboard")
-
-status = st.empty()
-chart_placeholder = st.empty()
-
-# session state
 if "buffer" not in st.session_state:
     st.session_state.buffer = []
 
@@ -63,36 +48,64 @@ if "time_step" not in st.session_state:
 if "scenario_id" not in st.session_state:
     st.session_state.scenario_id = 1
 
+if "step_count" not in st.session_state:
+    st.session_state.step_count = 0
+
 # -------------------------
-# MAIN LOOP
+# Scenario switching
 # -------------------------
+st.session_state.step_count += 1
+
+if st.session_state.step_count % 100 == 0:
+    st.session_state.scenario_id += 1
+    if st.session_state.scenario_id > len(SCENARIOS):
+        st.session_state.scenario_id = 1
+
 sid = st.session_state.scenario_id
 s = SCENARIOS[sid]
 
-pkt = simulate_sensors(noise=s["noise"])
+# -------------------------
+# Simulate sensors
+# -------------------------
+def simulate_sensors(noise):
+    return np.array([
+        random.uniform(0.5 - noise, 0.5 + noise)
+        for _ in range(num_features)
+    ])
 
-# feature extraction
-features = np.array([pkt[f"sensor{i}"] for i in range(1, num_features + 1)])
+features = simulate_sensors(s["noise"])
 features_scaled = scaler.transform([features])[0]
 
-# buffer logic
-st.session_state.buffer.append(features_scaled)
+# -------------------------
+# Build shared buffer using CSV
+# -------------------------
+data = pd.read_csv(DATA_FILE)
 
+# keep local buffer for first session
+st.session_state.buffer.append(features_scaled)
 if len(st.session_state.buffer) > sequence_length:
     st.session_state.buffer.pop(0)
 
-# prediction
+# -------------------------
+# Prediction
+# -------------------------
 if len(st.session_state.buffer) == sequence_length:
     input_seq = np.array(st.session_state.buffer).reshape(1, sequence_length, num_features)
     pred = float(model.predict(input_seq)[0][0])
 else:
-    pred = 0.0
+    # fallback → use last known value from shared data
+    if len(data) > 0:
+        pred = data["RUL"].iloc[-1]
+    else:
+        pred = 0.0
 
-# update time
+# -------------------------
+# Update time
+# -------------------------
 st.session_state.time_step += 1
 
 # -------------------------
-# SAVE DATA
+# Save data
 # -------------------------
 new_row = pd.DataFrame({
     "time": [st.session_state.time_step],
@@ -102,44 +115,37 @@ new_row = pd.DataFrame({
 
 new_row.to_csv(DATA_FILE, mode="a", header=False, index=False)
 
-# -------------------------
-# LOAD DATA
-# -------------------------
+# reload data
 data = pd.read_csv(DATA_FILE).tail(100)
 
 # -------------------------
-# UI DISPLAY
+# UI (use container to reduce flicker)
 # -------------------------
-status.markdown(f"""
-### Engine E{sid:03d}
+st.title("🛠️ NASA Turbofan Live Predictive Maintenance Dashboard")
 
-🧪 **Scenario:** `{s['name']}`
+with st.container():
+    st.markdown(f"""
+    ### Engine E{sid:03d}
 
-📊 **Predicted RUL:** `{pred:.1f} cycles`
-""")
+    🧪 **Scenario:** `{s['name']}`  
+    📊 **Predicted RUL:** `{pred:.1f} cycles`
+    """)
 
-# recent data
-st.subheader("Recent Data")
-st.dataframe(data.tail(10), use_container_width=True)
+    st.subheader("Recent Data")
+    st.dataframe(data.tail(10), use_container_width=True)
 
-# -------------------------
-# ALTAIR CHART (with labels)
-# -------------------------
-st.subheader("RUL vs Time")
+    st.subheader("RUL vs Time")
 
-chart = alt.Chart(data).mark_line(point=True).encode(
-    x=alt.X('time:Q', title='Time (seconds)'),
-    y=alt.Y('RUL:Q', title='Remaining Useful Life (cycles)'),
-    tooltip=['time', 'RUL', 'scenario']
-).properties(
-    width=700,
-    height=400
-)
+    chart = alt.Chart(data).mark_line(point=True).encode(
+        x=alt.X('time:Q', title='Time (seconds)'),
+        y=alt.Y('RUL:Q', title='Remaining Useful Life (cycles)'),
+        tooltip=['time', 'RUL', 'scenario']
+    )
 
-chart_placeholder.altair_chart(chart, use_container_width=True)
+    st.altair_chart(chart, use_container_width=True)
 
 # -------------------------
-# LOOP CONTROL
+# LOOP
 # -------------------------
 time.sleep(2)
 st.rerun()
