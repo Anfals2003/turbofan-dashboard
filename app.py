@@ -58,7 +58,7 @@ for pkt in generate_packets(num_engines=1):
     # make model prediction
     features = np.array([[pkt[f"sensor{i}"] for i in range(1, num_features + 1)]])
     features_scaled = scaler.transform(features)
-    features_scaled = features_scaled.reshape((1, 1, num_features))
+    features_scaled = features_scaled.reshape((1, 30, num_features))
     
     pred = model.predict(features_scaled)[0][0]
     pkt["Predicted_RUL"] = float(pred)
