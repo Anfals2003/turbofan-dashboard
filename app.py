@@ -10,7 +10,7 @@ from itertools import cycle
 
 model = load_model("model/rul_cnn_lstm.h5")
 scaler = joblib.load("model/scaler.pkl")
-
+num_features = scaler.n_features_in_
 SCENARIOS = {
     1: {"name": "New engine", "rul": (250, 300), "noise": 0.01},
     2: {"name": "Mid‑age engine", "rul": (120, 200), "noise": 0.05},
@@ -56,7 +56,6 @@ history = pd.DataFrame(columns=["engine_id", "scenario", "Predicted_RUL",
 # run the simulation
 for pkt in generate_packets(num_engines=1):
     # make model prediction
-    num_features = scaler.n_features_in_
     features = np.array([[pkt[f"sensor{i}"] for i in range(1, num_features + 1)]])
     features_scaled = scaler.transform(features)
     features_scaled = features_scaled.reshape((1, 1, num_features))
