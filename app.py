@@ -27,7 +27,7 @@ SCENARIOS = {
 def simulate_sensors(base_val=0.5, noise=0.1):
     return {
         f"sensor{i}": round(random.uniform(base_val - noise, base_val + noise), 3)
-        for i in range(1, 6)
+        for i in range(1, 22)
     }
 
 def generate_packets(num_engines=5):
