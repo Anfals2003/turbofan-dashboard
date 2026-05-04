@@ -13,7 +13,8 @@ import altair as alt
 model = load_model("model/rul_cnn_lstm.h5")
 scaler = joblib.load("model/scaler.pkl")
 
-num_features = scaler.n_features_in_
+# FORCE correct feature size (CMAPSS)
+num_features = 21
 sequence_length = model.input_shape[1]
 
 DATA_FILE = "shared_data.csv"
@@ -69,7 +70,6 @@ if t >= len(engine_df):
     st.session_state.time_step = 0
     st.session_state.buffer = []
 
-    # Reset CSV
     pd.DataFrame(columns=["time", "Predicted_RUL", "True_RUL", "unit"]).to_csv(DATA_FILE, index=False)
 
     st.rerun()
@@ -79,7 +79,15 @@ if t >= len(engine_df):
 # -------------------------
 row = engine_df.iloc[t]
 
-sensor_cols = [f"s{i}" for i in range(1, num_features + 1)]
+# FIXED sensor columns
+sensor_cols = [f"s{i}" for i in range(1, 22)]
+
+# Safety check (very useful)
+missing = [c for c in sensor_cols if c not in df.columns]
+if missing:
+    st.error(f"Missing columns: {missing}")
+    st.stop()
+
 features = row[sensor_cols].values
 features_scaled = scaler.transform([features])[0]
 
