@@ -56,7 +56,7 @@ history = pd.DataFrame(columns=["engine_id", "scenario", "Predicted_RUL",
 # run the simulation
 for pkt in generate_packets(num_engines=1):
     # make model prediction
-    features = np.array([[pkt[f"sensor{i}"] for i in range(1, 6)]])
+    features = np.array([[pkt[f"sensor{i}"] for i in range(1, 22)]])
     features_scaled = scaler.transform(features)
     features_scaled = features_scaled.reshape((1, 1, 5))
     
